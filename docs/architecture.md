@@ -1,57 +1,73 @@
-# Deauther God Mode Project Structure
+# Firmware architecture
 
-This document describes the full structure and components of our dual-band God mode deauther project for ESP32-C5.
+How the ESP32-C5 deauther firmware is put together: modules, tasks, data flow, and
+the reasoning behind the trickier design decisions.
 
-## High-Level Architecture
+## Modules
 
-1. **Embedded Firmware** (in `firmware/`):
-   - ESP-IDF based implementation
-   - WiFi control capabilities for both 2.4GHz and 5GHz
-   - UART interface for host communication  
-   - HTTP server for web UI
+```
+app_main ──► wifi_system_init()   radio up: AP (control UI) + STA (scan), dual band
+         ├─► control_init()       attack + stats FreeRTOS tasks
+         ├─► led_init()           WS2812 status LED task
+         ├─► http_server_start()  single-page web UI at http://192.168.4.1/
+         └─► start_cli()          esp_console REPL on UART0
+```
 
-2. **Web Interface** (in `ui/`):
-   - Mobile-responsive HTML/CSS/JS frontend
-   - Real-time status updates
-   - Control panel for deauth operations
-   - Network scanning and display
+| Module | Responsibility |
+|---|---|
+| `wifi/` | Radio lifecycle: AP+STA bring-up, dual-band scan (`wifi_dual_band_scan`), channel parking (`wifi_park_channel`), promiscuous station sniffing (`wifi_count_clients`, `wifi_sniff_channel`), SAFE/protected list |
+| `deauth/` | Frame template, `blast()` raw-TX loop with NO_MEM retry, TX interface selection, per-second stats; linker-wrap bypass of the deauth sanity check |
+| `control/` | The only owner of attack state. Modes: `IDLE`, `TARGET` (selected APs), `STRIKE` (one locked client), `HUNT` (one client across bands), `GOD`. Both the HTTP handlers and CLI commands call into it — there is exactly one code path per action |
+| `godmode/` | God Mode policy on top of control/wifi primitives (skip SAFE + own AP, focus-fire client-bearing networks, fallback broadcast sweep) |
+| `http_server/` | Serves the embedded single-page UI and a small JSON API |
+| `led/` | Maps `control_led_code()` to colors/blinks |
 
-3. **Host Communication**:
-   - UART-based configuration interface  
-   - HTTP server on embedded device
-   - Status reporting to web UI
+## Tasks
 
-## Key Features Implementation
+| Task | Prio | Stack | Loop |
+|---|---|---|---|
+| `attack` | 4 | 4 KB | Runs the active mode's cycle: TARGET hammer / STRIKE directed blast / HUNT band rotation / GOD sweep + 45 s re-scan. Sleeps 200 ms when idle |
+| `stats` | 3 | 3 KB | Once per second: frames/sec, fail %, heap, per-mode detail log |
+| `led` | 3 | 2.5 KB | Polls `control_led_code()` every ~50–400 ms |
+| `httpd` (IDF) | — | — | Serves UI/API; long calls (scan) block one worker by design — the UI retries |
+| WiFi driver task | high | — | Delivers promiscuous frames to `sniffer_cb`, which records stations |
 
-### 1. Dual-Band Support
-- Automatic detection of 2.4GHz and 5GHz networks
-- Simultaneous monitoring across both bands
-- Channel switching capabilities
+## Data flow
 
-### 2. God Mode Functionality  
-- Comprehensive network scanning
-- Targets all clients on all networks
-- Multi-channel attack sequences
-- System-wide deauthentication capabilities
+1. **Scan** — `wifi_dual_band_scan()` warms the 5 GHz radio, runs an active
+   scan across both bands, and rebuilds the network table (BSSID, SSID, RSSI,
+   channel, band, auth). WPA3/WPA2-WPA3-mixed are flagged PMF = deauth-immune.
+   `wifi_count_clients()` then hops every distinct (channel, band) pair with
+   promiscuous mode on, dwelling ~700 ms each; data/mgmt frames map
+   addr1/addr2 → (BSSID, station) pairs that fill each AP's client list.
+2. **Attack (TARGET)** — snapshots the selected networks first so later re-scans
+   can't shift indices mid-attack, pre-sniffs each target's channel for clients,
+   then loops: broadcast deauth+disassoc burst plus directed bursts per known
+   client. Every ~12 cycles it re-sniffs target channels to catch clients that
+   started transmitting while under attack.
+3. **STRIKE** — parks the whole radio on one (channel, band), drops the STA so
+   nothing pulls the radio off-channel, and blasts directed deauth at one MAC.
+4. **HUNT** — rotates across up to four parked bands, hammering ~300 ms each, so a
+   client roaming between bands lands where the attack already is.
+5. **GOD** — every 45 s refreshes scan+clients, otherwise sweeps all non-SAFE
+   networks with detected clients (broadcast + heavy directed); if no clients were
+   seen anywhere it falls back to a broadcast sweep.
 
-### 3. Web UI Components
-- Device status panel
-- Configuration controls  
-- Network scan results
-- Real-time logging output
-- Mobile-responsive design
+## Design notes
 
-## Development Roadmap
-
-1. **Firmware Core**: Basic WiFi control and UART interface
-2. **Deauth Engine**: Dual-band scanning and deauth logic
-3. **HTTP Server**: Embedded web server for UI access  
-4. **God Mode Implementation**: Full network targeting capabilities
-5. **Mobile UI**: Responsive web interface with real-time updates
-
-## Integration Points
-
-- Serial communication via UART (`/dev/ttyUSB0`)
-- HTTP server on port 80 when connected to network
-- WiFi scanning and deauth operations
-- Status reporting to both serial and HTTP interfaces
+- **Deauth TX gating** — Espressif gates raw deauth/disassoc in
+  `ieee80211_raw_frame_sanity_check()`. Overridden via linker wrap
+  (`-Wl,-wrap=...` in `main/CMakeLists.txt`, stub in `deauth/deauth_engine.c`);
+  the IDF library itself is never modified.
+- **Channel parking** — in APSTA the AP beacons pull the radio back to its config
+  channel, scattering injected 5 GHz frames. `wifi_park_channel()` re-hosts the AP
+  on the target channel/band so `esp_wifi_80211_tx(WIFI_IF_AP)` truly radiates
+  there. Control drops while parked; `stop` re-hosts the AP home.
+- **Concurrency** — attack state is written only after the attack task is halted
+  (`MODE_IDLE` + settle delay) so a re-arm can't feed it torn structures. Client
+  records, shared between the WiFi driver task (writer) and everything else
+  (readers), are guarded by a spinlock with microsecond-scale critical sections.
+- **No persistence** — configuration is RAM-only by design: the device boots idle
+  and never attacks until someone explicitly starts a mode.
+- **SAFE list** — BSSID-keyed so protection survives re-scans; God Mode also always
+  skips its own control AP.

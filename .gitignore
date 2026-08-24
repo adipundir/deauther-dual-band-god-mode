@@ -8,7 +8,6 @@ firmware/FINDINGS.md
 
 # Local-only scratch
 private/
-01458280
 
 # OS / Python cruft
 .DS_Store
