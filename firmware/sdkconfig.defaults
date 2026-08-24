@@ -1,0 +1,28 @@
+# --- Target ---
+CONFIG_IDF_TARGET="esp32c5"
+
+# --- Console on UART0 (matches the CP210x "UART" port used for flashing/logs) ---
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+
+# --- Custom partition table (single factory app, 2.75 MB) ---
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# --- Flash: 4 MB, matches the C5 DevKit ---
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# --- Allow raw 802.11 TX; leave WiFi in RAM storage (no creds persisted) ---
+CONFIG_ESP_WIFI_ENABLE_WPA3_SAE=y
+
+# --- Bigger main task stack for the CLI + attack loop ---
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# --- 1 kHz tick so short delays (frame pacing) are precise, not 10ms ---
+CONFIG_FREERTOS_HZ=1000
+
+# --- Max out WiFi TX throughput for injection (more buffers = higher deauth
+#     rate, esp. on 5 GHz where unicast ACK-waits drain the queue slowly) ---
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=64
+CONFIG_ESP_WIFI_TX_BUFFER_TYPE=1
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32

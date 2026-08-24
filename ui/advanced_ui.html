@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deauther God Mode - Advanced WiFi Control</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+        .status-panel {
+            background-color: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .status-indicator {
+            font-weight: bold;
+            padding: 8px 15px;
+            border-radius: 5px;
+        }
+        .running { background-color: #d4edda; color: #155724; }
+        .stopped { background-color: #f8d7da; color: #721c24; }
+        .scanning { background-color: #fff3cd; color: #856404; }
+        
+        .section-title {
+            color: #3498db;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+            margin-top: 25px;
+        }
+        
+        .network-card {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .network-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .network-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .detail-item {
+            font-size: 0.9em;
+            color: #666;
+        }
+        
+        .devices-list {
+            margin-top: 15px;
+            border-top: 1px solid #eee;
+            padding-top: 15px;
+        }
+        
+        .device-card {
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin: 15px 0;
+        }
+        
+        button {
+            background-color: #3498db;
+            border: none;
+            color: white;
+            padding: 10px 15px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 5px;
+            flex: 1;
+            min-width: 120px;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        .god-mode-btn {
+            background-color: #e74c3c;
+        }
+        .god-mode-btn:hover {
+            background-color: #c0392b;
+        }
+        .deauth-btn {
+            background-color: #f39c12;
+        }
+        .deauth-btn:hover {
+            background-color: #d35400;
+        }
+        
+        .log-output {
+            background-color: #000;
+            color: #0f0;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            height: 200px;
+            overflow-y: scroll;
+            margin-top: 20px;
+            font-size: 12px;
+        }
+        
+        .band-indicator {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 0.8em;
+        }
+        .band-24ghz { background-color: #3498db; color: white; }
+        .band-5ghz { background-color: #9b59b6; color: white; }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            .status-panel {
+                flex-direction: column;
+                gap: 10px;
+            }
+            .network-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 5px;
+            }
+            .controls {
+                flex-direction: column;
+            }
+            button {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Deauther God Mode - Advanced WiFi Control</h1>
+
+        <!-- Device Status -->
+        <div class="status-panel">
+            <div>
+                <strong>Device Status:</strong> 
+                <span id="device-status" class="status-indicator stopped">Stopped</span>
+            </div>
+            <div>
+                <strong>IP Address:</strong> <span id="device-ip">192.168.4.1</span>
+            </div>
+            <div>
+                <strong>Networks Found:</strong> <span id="networks-count">0</span>
+            </div>
+        </div>
+
+        <!-- Control Panel -->
+        <h2 class="section-title">Controls</h2>
+        <div class="controls">
+            <button id="scan-btn">Scan Networks</button>
+            <button id="start-btn">Start Deauth</button>
+            <button id="stop-btn">Stop Deauth</button>
+            <button id="god-mode-btn" class="god-mode-btn">Enable God Mode</button>
+        </div>
+
+        <!-- Network List -->
+        <h2 class="section-title">Networks in Range</h2>
+        
+        <!-- Network 1 -->
+        <div class="network-card">
+            <div class="network-header">
+                <div><strong>HomeWiFi_2.4GHz</strong></div>
+                <div><span class="band-indicator band-24ghz">2.4GHz</span></div>
+            </div>
+            <div class="network-details">
+                <div class="detail-item"><strong>BSSID:</strong> AA:BB:CC:DD:EE:FF</div>
+                <div class="detail-item"><strong>Channel:</strong> 6</div>
+                <div class="detail-item"><strong>RSSI:</strong> -52dBm</div>
+                <div class="detail-item"><strong>Devices:</strong> <span id="network-devices-1">3</span></div>
+            </div>
+            
+            <div class="devices-list">
+                <h3>Connected Devices:</h3>
+                <div class="device-card">
+                    <div>11:22:33:44:55:66 (Client1)</div>
+                    <button class="deauth-btn">Deauth</button>
+                </div>
+                <div class="device-card">
+                    <div>77:88:99:AA:BB:CC (Client2)</div>
+                    <button class="deauth-btn">Deauth</button>
+                </div>
+                <div class="device-card">
+                    <div>DD:EE:FF:11:22:33 (Client3)</div>
+                    <button class="deauth-btn">Deauth</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Network 2 -->
+        <div class="network-card">
+            <div class="network-header">
+                <div><strong>Office_Network_5GHz</strong></div>
+                <div><span class="band-indicator band-5ghz">5GHz</span></div>
+            </div>
+            <div class="network-details">
+                <div class="detail-item"><strong>BSSID:</strong> FF:EE:DD:CC:BB:AA</div>
+                <div class="detail-item"><strong>Channel:</strong> 149</div>
+                <div class="detail-item"><strong>RSSI:</strong> -60dBm</div>
+                <div class="detail-item"><strong>Devices:</strong> <span id="network-devices-2">2</span></div>
+            </div>
+            
+            <div class="devices-list">
+                <h3>Connected Devices:</h3>
+                <div class="device-card">
+                    <div>12:34:56:78:90:AB (Laptop)</div>
+                    <button class="deauth-btn">Deauth</button>
+                </div>
+                <div class="device-card">
+                    <div>EF:CD:AB:98:76:54 (Phone)</div>
+                    <button class="deauth-btn">Deauth</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Network 3 -->
+        <div class="network-card">
+            <div class="network-header">
+                <div><strong>Guest_Network</strong></div>
+                <div><span class="band-indicator band-24ghz">2.4GHz</span></div>
+            </div>
+            <div class="network-details">
+                <div class="detail-item"><strong>BSSID:</strong> 55:66:77:88:99:AA</div>
+                <div class="detail-item"><strong>Channel:</strong> 11</div>
+                <div class="detail-item"><strong>RSSI:</strong> -58dBm</div>
+                <div class="detail-item"><strong>Devices:</strong> <span id="network-devices-3">1</span></div>
+            </div>
+            
+            <div class="devices-list">
+                <h3>Connected Devices:</h3>
+                <div class="device-card">
+                    <div>BB:CC:DD:EE:FF:00 (iPad)</div>
+                    <button class="deauth-btn">Deauth</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Log Output -->
+        <h2 class="section-title">System Logs</h2>
+        <div id="log-output" class="log-output">
+[09:15:32] System initialized
+[09:15:33] WiFi interfaces configured  
+[09:15:35] Starting network scan...
+[09:15:40] Scan complete. Found 3 networks:
+  - HomeWiFi_2.4GHz (Channel 6) - 3 devices
+  - Office_Network_5GHz (Channel 149) - 2 devices  
+  - Guest_Network (Channel 11) - 1 device
+[09:15:42] Ready for commands
+        </div>
+    </div>
+
+    <script>
+        // Enhanced UI functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const scanBtn = document.getElementById('scan-btn');
+            const startBtn = document.getElementById('start-btn');  
+            const stopBtn = document.getElementById('stop-btn');
+            const godModeBtn = document.getElementById('god-mode-btn');
+            
+            // Status indicator reference 
+            const deviceStatus = document.getElementById('device-status');
+            
+            // Status update function
+            function updateStatus(status) {
+                deviceStatus.className = 'status-indicator ' + status;
+                switch(status) {
+                    case 'running':
+                        deviceStatus.textContent = 'Running';
+                        break;
+                    case 'stopped':
+                        deviceStatus.textContent = 'Stopped';
+                        break;
+                    case 'scanning':
+                        deviceStatus.textContent = 'Scanning';
+                        break;
+                }
+            }
+            
+            // Log function
+            function addLog(message) {
+                const logOutput = document.getElementById('log-output');
+                const timestamp = new Date().toLocaleTimeString();
+                logOutput.innerHTML += `[${timestamp}] ${message}\n`;
+                logOutput.scrollTop = logOutput.scrollHeight;
+            }
+            
+            // Event listeners for buttons
+            scanBtn.addEventListener('click', function() {
+                updateStatus('scanning');
+                addLog('Scanning for networks...');
+                
+                // Simulate scanning process
+                setTimeout(() => {
+                    addLog('Scan complete. Found 3 networks.');
+                    addLog('Ready for commands');
+                    updateStatus('stopped'); 
+                }, 2000);
+            });
+
+            startBtn.addEventListener('click', function() {
+                updateStatus('running');
+                addLog('Starting deauthentication attack...');
+                addLog('Running in dual-band (2.4GHz + 5GHz) mode');
+            });
+
+            stopBtn.addEventListener('click', function() {
+                updateStatus('stopped'); 
+                addLog('Stopping deauthentication attack');
+            });
+
+            godModeBtn.addEventListener('click', function() {
+                updateStatus('running');
+                addLog('Enabling God mode...');
+                addLog('God mode activated - targeting all networks on all channels');
+                addLog('Scanning all possible bands and channels...');
+            });
+            
+            // Add deauth button functionality
+            const deauthButtons = document.querySelectorAll('.deauth-btn');
+            deauthButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    const deviceInfo = this.parentElement.querySelector('div').textContent;
+                    addLog(`Deauthenticating: ${deviceInfo}`);
+                    this.textContent = 'Deauthing...';
+                    
+                    setTimeout(() => {
+                        this.textContent = 'Deauth';
+                        addLog(`Deauthentication complete for: ${deviceInfo}`);
+                    }, 1000);
+                });
+            });
+
+            // Initially set status to stopped
+            updateStatus('stopped');
+        });
+    </script>
+</body>
+</html>

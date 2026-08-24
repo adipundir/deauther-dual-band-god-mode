@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deauther God Mode UI</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .control-group {
+            margin-bottom: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #fafafa;
+        }
+        .control-row {
+            display: flex;
+            margin-bottom: 10px;
+            align-items: center;
+        }
+        .control-row label {
+            width: 200px;
+            font-weight: bold;
+        }
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 15px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .status.running {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status.stopped {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .status.scanning {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .log-output {
+            background-color: #000;
+            color: #0f0;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            height: 200px;
+            overflow-y: scroll;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Deauther God Mode</h1>
+        
+        <div class="control-group">
+            <h2>Device Status</h2>
+            <div class="control-row">
+                <label>Status:</label>
+                <div id="device-status" class="status stopped">Stopped</div>
+            </div>
+            <div class="control-row">
+                <label>IP Address:</label>
+                <span id="device-ip">192.168.4.1</span>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <h2>Configuration</h2>
+            <div class="control-row">
+                <label>Band:</label>
+                <select id="band-select">
+                    <option value="both">Both Bands (2.4GHz & 5GHz)</option>
+                    <option value="2.4GHz">2.4GHz Only</option>
+                    <option value="5GHz">5GHz Only</option>
+                </select>
+            </div>
+            <div class="control-row">
+                <label>Scan Mode:</label>
+                <select id="scan-mode">
+                    <option value="auto">Auto Scan</option>
+                    <option value="manual">Manual Channel</option>
+                    <option value="god">God Mode</option>
+                </select>
+            </div>
+            <div class="control-row">
+                <label>Channel:</label>
+                <input type="number" id="channel-input" min="1" max="165" value="1">
+            </div>
+        </div>
+
+        <div class="control-group">
+            <h2>Controls</h2>
+            <button id="start-btn">Start Deauth</button>
+            <button id="stop-btn">Stop Deauth</button>
+            <button id="scan-btn">Scan Networks</button>
+            <button id="god-mode-btn">Enable God Mode</button>
+        </div>
+
+        <div class="control-group">
+            <h2>Networks Found</h2>
+            <div id="networks-list">No networks found yet</div>
+        </div>
+
+        <div class="control-group">
+            <h2>Log Output</h2>
+            <div id="log-output" class="log-output">
+                System ready...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Simple simulation for demonstration
+        document.addEventListener('DOMContentLoaded', function() {
+            const startBtn = document.getElementById('start-btn');
+            const stopBtn = document.getElementById('stop-btn');
+            const scanBtn = document.getElementById('scan-btn');
+            const godModeBtn = document.getElementById('god-mode-btn');
+            const deviceStatus = document.getElementById('device-status');
+            const logOutput = document.getElementById('log-output');
+            const networksList = document.getElementById('networks-list');
+
+            // Status update function
+            function updateStatus(status) {
+                deviceStatus.className = 'status ' + status;
+                switch(status) {
+                    case 'running':
+                        deviceStatus.textContent = 'Running';
+                        break;
+                    case 'stopped':
+                        deviceStatus.textContent = 'Stopped';
+                        break;
+                    case 'scanning':
+                        deviceStatus.textContent = 'Scanning';
+                        break;
+                }
+            }
+
+            // Log function
+            function addLog(message) {
+                const timestamp = new Date().toLocaleTimeString();
+                logOutput.innerHTML += `[${timestamp}] ${message}\n`;
+                logOutput.scrollTop = logOutput.scrollHeight;
+            }
+
+            // Mock network data
+            function loadNetworks() {
+                const networks = [
+                    {ssid: "HomeWiFi_2.4GHz", bssid: "AA:BB:CC:DD:EE:FF", channel: 6, rssi: -52},
+                    {ssid: "Office_Network", bssid: "11:22:33:44:55:66", channel: 36, rssi: -60},
+                    {ssid: "Guest_Network_5GHz", bssid: "FF:EE:DD:CC:BB:AA", channel: 149, rssi: -65},
+                ];
+                
+                networksList.innerHTML = networks.map(n => 
+                    `<div><strong>${n.ssid}</strong> (${n.bssid}) - Channel: ${n.channel}, RSSI: ${n.rssi}dBm</div>`
+                ).join('');
+            }
+
+            // Event listeners
+            startBtn.addEventListener('click', function() {
+                updateStatus('running');
+                addLog('Starting deauthentication attack...');
+                addLog('Running in dual-band (2.4GHz + 5GHz) mode');
+            });
+
+            stopBtn.addEventListener('click', function() {
+                updateStatus('stopped');
+                addLog('Stopping deauthentication attack');
+            });
+
+            scanBtn.addEventListener('click', function() {
+                updateStatus('scanning');
+                addLog('Scanning for networks...');
+                setTimeout(() => {
+                    loadNetworks();
+                    updateStatus('stopped');
+                    addLog('Network scan complete. Found 3 networks.');
+                }, 1000);
+            });
+
+            godModeBtn.addEventListener('click', function() {
+                addLog('Enabling God mode...');
+                addLog('God mode activated - targeting all networks on all channels');
+                addLog('Scanning all possible bands and channels...');
+            });
+
+            // Load initial networks
+            loadNetworks();
+            
+            // Initial status
+            updateStatus('stopped');
+        });
+    </script>
+</body>
+</html>
