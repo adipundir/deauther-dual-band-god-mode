@@ -1,7 +1,7 @@
 /*
  * ESP32-C5 Dual-Band Deauther — entry point.
  *
- * Control from your phone: connect to Wi-Fi "Deauther-C5" (pass "deauther123"),
+ * Control from your phone: connect to Wi-Fi "deauther-ctrl" (pass "deauther1234"),
  * open http://192.168.4.1/. A serial CLI on UART0 is also available for debug.
  *
  * Single radio: scanning/deauthing briefly drops the AP — that is physics, not
@@ -123,17 +123,17 @@ static void start_cli(void)
     ESP_ERROR_CHECK(esp_console_new_repl_uart(&uc, &rc, &repl));
     esp_console_register_help_command();
     const esp_console_cmd_t cmds[] = {
-        { "scan",   "Scan 2.4 + 5 GHz",              NULL, &cmd_scan,   NULL },
-        { "list",   "List scanned networks",         NULL, &cmd_list,   NULL },
-        { "dev",    "Count devices per AP",          NULL, &cmd_dev,    NULL },
-        { "heap",   "Show free/min heap",            NULL, &cmd_heap,   NULL },
-        { "txtest", "Injection self-test (safe)",    NULL, &cmd_txtest, NULL },
-        { "deauth", "deauth <i> [i...]: attack APs", NULL, &cmd_deauth, NULL },
-        { "strike", "strike <ch> <is5> <bssid> <mac>: lock 1 client", NULL, &cmd_strike, NULL },
-        { "hunt",   "hunt <mac> <ch> <is5> <bssid> [...]: dual-band chase", NULL, &cmd_hunt, NULL },
-        { "god",    "GOD MODE: attack all",          NULL, &cmd_god,    NULL },
-        { "protect","protect <i...>: toggle SAFE (God skips)", NULL, &cmd_protect, NULL },
-        { "stop",   "Stop attacking",                NULL, &cmd_stop,   NULL },
+        { .command = "scan",   .help = "Scan 2.4 + 5 GHz",                        .func = &cmd_scan },
+        { .command = "list",   .help = "List scanned networks (JSON)",            .func = &cmd_list },
+        { .command = "dev",    .help = "Count devices per AP",                    .func = &cmd_dev },
+        { .command = "heap",   .help = "Show free/min heap",                      .func = &cmd_heap },
+        { .command = "txtest", .help = "Injection self-test (safe)",              .func = &cmd_txtest },
+        { .command = "deauth", .help = "deauth <i> [i...]: attack APs",           .func = &cmd_deauth },
+        { .command = "strike", .help = "strike <ch> <is5> <bssid> <mac>: lock 1 client",  .func = &cmd_strike },
+        { .command = "hunt",   .help = "hunt <mac> <ch> <is5> <bssid> [...]: dual-band chase", .func = &cmd_hunt },
+        { .command = "god",    .help = "GOD MODE: attack all (skips SAFE)",       .func = &cmd_god },
+        { .command = "protect", .help = "protect <i...>: toggle SAFE (God skips)", .func = &cmd_protect },
+        { .command = "stop",   .help = "Stop attacking",                          .func = &cmd_stop },
     };
     for (size_t i = 0; i < sizeof(cmds)/sizeof(cmds[0]); i++)
         ESP_ERROR_CHECK(esp_console_cmd_register(&cmds[i]));

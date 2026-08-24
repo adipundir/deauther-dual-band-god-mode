@@ -155,8 +155,9 @@ void wifi_set_channel_band(uint8_t channel, bool is_5ghz)
 
 void wifi_restore_ap_channel(void)
 {
-    esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO);
-    esp_wifi_set_channel(WIFI_AP_HOME_CH, WIFI_SECOND_CHAN_NONE);
+    // Full re-host back on the home channel: resets both the radio AND the AP
+    // config, which wifi_park_channel() may have moved to another band/channel.
+    wifi_set_ap_channel(WIFI_AP_HOME_CH);
 }
 
 void wifi_park_channel(uint8_t ch, bool is_5ghz)
@@ -189,22 +190,31 @@ void wifi_set_ap_channel(uint8_t ch)
 
 // ---- station sniffing -------------------------------------------------------
 
+// Client records are written from the WiFi driver task (sniffer callback) and
+// read from the attack/stats/HTTP tasks; this spinlock keeps those views
+// consistent. Sections are tiny (a few MAC compares/copies).
+static portMUX_TYPE s_cli_mux = portMUX_INITIALIZER_UNLOCKED;
+
 // Record/update station `mac` under network index `ni`.
 static void add_client(int ni, const uint8_t *mac, int8_t rssi)
 {
+    portENTER_CRITICAL(&s_cli_mux);
     for (int c = 0; c < s_networks[ni].clients; c++) {
         if (memcmp(s_clients[ni][c].mac, mac, 6) == 0) {     // seen -> update
             s_clients[ni][c].rssi = rssi;
             if (s_clients[ni][c].pkts < 0xffff) s_clients[ni][c].pkts++;
+            portEXIT_CRITICAL(&s_cli_mux);
             return;
         }
     }
-    if (s_networks[ni].clients >= WIFI_MAX_CLIENTS) return;
-    wifi_client_t *nc = &s_clients[ni][s_networks[ni].clients];
-    memcpy(nc->mac, mac, 6);
-    nc->rssi = rssi;
-    nc->pkts = 1;
-    s_networks[ni].clients++;
+    if (s_networks[ni].clients < WIFI_MAX_CLIENTS) {
+        wifi_client_t *nc = &s_clients[ni][s_networks[ni].clients];
+        memcpy(nc->mac, mac, 6);
+        nc->rssi = rssi;
+        nc->pkts = 1;
+        s_networks[ni].clients++;
+    }
+    portEXIT_CRITICAL(&s_cli_mux);
 }
 
 static volatile uint32_t s_sniff_seen = 0;   // debug: frames delivered to cb
@@ -236,7 +246,9 @@ int wifi_count_clients(void)
 {
     if (s_network_count == 0) return 0;
 
+    portENTER_CRITICAL(&s_cli_mux);
     for (int i = 0; i < s_network_count; i++) s_networks[i].clients = 0;
+    portEXIT_CRITICAL(&s_cli_mux);
 
     // Distinct (channel, band) pairs to visit.
     struct { uint8_t ch; bool g5; } chans[WIFI_MAX_NETWORKS];
@@ -308,8 +320,10 @@ void wifi_sniff_channel(uint8_t channel, bool is_5ghz, int dwell_ms)
 int wifi_get_clients(int ni, wifi_client_t *out, int cap)
 {
     if (ni < 0 || ni >= s_network_count) return 0;
+    portENTER_CRITICAL(&s_cli_mux);
     int c = s_networks[ni].clients;
     if (c > cap) c = cap;
     for (int i = 0; i < c; i++) out[i] = s_clients[ni][i];
+    portEXIT_CRITICAL(&s_cli_mux);
     return c;
 }

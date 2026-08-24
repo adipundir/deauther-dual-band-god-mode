@@ -43,8 +43,8 @@ void wifi_restore_ap_channel(void);
 // (a 2.4 GHz AP can't hold the radio on 5 GHz). Phone control drops while parked.
 void wifi_park_channel(uint8_t ch, bool is_5ghz);
 
-// Move the control AP to `ch` (2.4 GHz). Used to co-channel a single target so
-// injection and the phone's connection share one channel — no disconnects.
+// Move the control AP back to a 2.4 GHz home channel (2.4 GHz). Used by Stop
+// so the phone can reconnect after an attack parked it elsewhere.
 void wifi_set_ap_channel(uint8_t ch);
 
 // Hop every scanned channel, sniff for associated stations, fill .clients.

