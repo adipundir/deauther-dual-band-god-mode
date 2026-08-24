@@ -46,6 +46,28 @@ On boot the device hosts a WiFi access point (default SSID `deauther-ctrl`, pass
 `http://192.168.4.1/` to scan, pick target networks live, and run attacks. **Change this
 default AP password before flashing.**
 
+## God Mode
+
+God Mode is a one-tap "attack everything in range" mode. From the web UI, tap **God** (or call
+`/api/god`); tap **Stop** (or `/api/stop`) to end it. Once on, the device continuously rescans
+both bands and deauthenticates every network it finds, hopping channel and band as it goes.
+
+What it does each sweep:
+
+- **Skips protected networks.** Any network you mark **SAFE** (via **Protect** in the UI) is
+  left alone, and the device never attacks its own control AP.
+- **Focus-fires on networks with clients.** Networks that actually have detected devices get a
+  broadcast deauth plus a heavy directed deauth per client, and are revisited on a short cycle.
+  Concentrating on client-bearing APs is what keeps devices down; spraying empty networks just
+  wastes radio time.
+- **Falls back to a broadcast sweep** across all non-SAFE networks when no clients are visible
+  yet, so it still disrupts while the next scan discovers clients.
+- **Cannot deauth PMF/WPA3 networks.** Those use Protected Management Frames and ignore deauth;
+  the UI flags them `[PMF]`.
+
+Because a single radio can only be on one channel at a time, God Mode against many networks is
+disruptive rather than a permanent, simultaneous blackout of every one.
+
 ## Authorized use only
 
 This is a security-research and education project. Sending deauthentication frames against
