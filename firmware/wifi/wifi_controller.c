@@ -97,6 +97,11 @@ void wifi_system_init(void)
 
 int wifi_dual_band_scan(void)
 {
+    // A TARGET-mode re-sniff may still be winding down in the attack task when
+    // a new scan lands (e.g. Scan tapped right after Attack); the driver
+    // refuses to scan while promiscuous is on, so clear it first.
+    esp_wifi_set_promiscuous(false);
+
     // The C5 calibrates its 5 GHz radio on first use; without this the very
     // first scan after boot returns 2.4 GHz only. Touch a 5 GHz channel to warm
     // it up, then scan both bands.
