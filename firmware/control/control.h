@@ -8,7 +8,6 @@ void        control_init(void);                     // start the attack task
 int         control_scan(void);                     // scan; returns AP count
 int         control_count_clients(void);            // sniff stations; returns total
 int         control_list_json(char *out, int cap);  // JSON array; returns length
-void        control_print_table(void);              // pretty ASCII table to console
 int         control_devices_json(int idx, char *out, int cap); // MACs of one AP
 int         control_attack_selection(const int *idx, int n); // # armed; -1 none valid
 int         control_strike(uint8_t ch, int is5, const uint8_t bssid[6], const uint8_t mac[6]); // lock 1 client

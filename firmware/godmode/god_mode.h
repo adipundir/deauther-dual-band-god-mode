@@ -4,9 +4,8 @@
 
 #include <stdbool.h>
 
-void god_mode_start(void);   // scan, then begin sweeping
+void god_mode_start(void);   // begin sweeping (first sweep re-scans)
 void god_mode_stop(void);
-bool god_mode_is_active(void);
 
 // One attack sweep over all cached networks. Call repeatedly from a task.
 // Returns the number of networks hit this sweep.

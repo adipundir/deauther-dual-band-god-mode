@@ -88,4 +88,4 @@ txtest                                 # harmless TX self-test (fake BSSID)
 ## Partitions
 
 `partitions.csv` keeps the stock single-factory-app layout with a large app slot
-(0x2C0000); the current build uses ~63% of it.
+(0x2C0000); the current build uses ~37% of it.

@@ -17,7 +17,7 @@ how networks and clients respond to management-frame attacks — including a one
 
 | Capability | Details |
 |---|---|
-| **Dual-band scan** | Active scan across 2.4 GHz (ch 1–13) and 5 GHz (incl. UNII-3, ch 149–165). Lists SSID, BSSID, band, channel, signal, security, and detected PMF/WPA3. |
+| **Dual-band scan** | Active scan across 2.4 GHz (ch 1–11; the `"US"` country code set at init doesn't scan ch 12/13) and 5 GHz (incl. UNII-3, ch 149–165). Lists SSID, BSSID, band, channel, signal, security, and detected PMF/WPA3. |
 | **Client discovery** | Promiscuous channel-hopping sniffing records the station MACs behind each AP (RSSI + frame count per device). |
 | **Targeted attack** | Pick APs in the web UI → continuous broadcast + directed (unicast) deauth/disassoc to every discovered client, non-stop until stopped. |
 | **God Mode** | Attacks every network in range except ones you marked SAFE and its own control AP. Focus-fires on client-bearing networks and re-scans every 45 s to pick up newcomers. |
@@ -63,10 +63,11 @@ esptool --chip esp32c5 -p <PORT> -b 460800 \
 Serial port by OS: macOS `/dev/cu.usbserial-*` · Linux `/dev/ttyUSB0` or
 `/dev/ttyACM0` · Windows `COMx` (see Device Manager).
 
-Verify the checksum before flashing:
+Verify the checksum before flashing (from the folder holding both files):
 
 ```sh
 shasum -a 256 -c deauther_c5_flash_all.bin.sha256     # macOS/Linux
+certutil -hashfile deauther_c5_flash_all.bin SHA256   # Windows
 ```
 
 ## Building from source

@@ -33,7 +33,9 @@ attacking.
 
 ### HTTP API
 
-All endpoints are GET and return JSON. The UI uses exactly these.
+All endpoints are GET and return JSON. The UI drives scan/list/status/attack/
+protect/god/stop; `/api/devices` backs the per-AP device expander and
+`/api/clients` is available for scripted use.
 
 | Endpoint | Response | Effect |
 |---|---|---|

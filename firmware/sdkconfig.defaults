@@ -11,7 +11,7 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # --- Flash: 4 MB, matches the C5 DevKit ---
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 
-# --- Allow raw 802.11 TX; leave WiFi in RAM storage (no creds persisted) ---
+# --- WPA3/SAE support (needed to recognize WPA3 networks during scans) ---
 CONFIG_ESP_WIFI_ENABLE_WPA3_SAE=y
 
 # --- Bigger main task stack for the CLI + attack loop ---

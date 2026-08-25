@@ -3,12 +3,18 @@
 #define DEAUTH_ENGINE_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "esp_wifi_types.h"
 #include "wifi_controller.h"
 
 // Select the interface deauth frames inject through. 5 GHz needs WIFI_IF_STA
 // (the AP is 2.4 GHz-only and can't transmit on 5 GHz); 2.4 GHz uses WIFI_IF_AP.
 void deauth_set_tx_if(wifi_interface_t ifx);
+
+// Register an abort gate: while *gate is true, blast() stops within one frame.
+// control.c uses this to make attack-state rewrites race-free. Pass NULL to
+// disable.
+void deauth_set_gate(const volatile bool *gate);
 
 // Send `count` deauth frames from `bssid` to `dest` (use the broadcast helper
 // to hit every client of an AP). Assumes the radio is already on the right

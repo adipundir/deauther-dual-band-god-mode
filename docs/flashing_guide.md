@@ -20,8 +20,9 @@ The merged image contains bootloader + partition table + app in one file:
 SHA-256 checksum beside it.
 
 ```sh
-# verify the download (macOS/Linux)
-shasum -a 256 -c deauther_c5_flash_all.bin.sha256
+# verify the download (from the folder holding both files)
+shasum -a 256 -c deauther_c5_flash_all.bin.sha256     # macOS/Linux
+certutil -hashfile deauther_c5_flash_all.bin SHA256   # Windows
 
 pip install esptool        # once
 
